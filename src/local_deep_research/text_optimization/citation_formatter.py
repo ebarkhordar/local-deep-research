@@ -9,6 +9,11 @@ from loguru import logger
 from slugify import slugify
 
 from ..content_fetcher.url_classifier import URLClassifier, URLType
+from ..utilities.url_utils import (
+    canonical_url_key,
+    library_display_url,
+    preferred_chunk_display,
+)
 
 
 # Marker emitted by ``IntegratedReportGenerator._format_final_report``
@@ -456,7 +461,17 @@ class CitationFormatter:
         # though the Sources section beneath was fully populated. Accept
         # both keys so the hyperlink fallback works regardless of engine.
         def _src_url(s):
-            return s.get("url") or s.get("link") or ""
+            # Same display rule as the bibliography in
+            # format_links_to_markdown: the canonical form, except for a
+            # library route, whose #chunk-<n> the canonical key drops.
+            raw = s.get("url") or s.get("link") or ""
+            if not isinstance(raw, str) or not raw:
+                return ""
+            return (
+                preferred_chunk_display(raw)
+                or library_display_url(raw)
+                or canonical_url_key(raw)
+            )
 
         adapted: Dict[str, Tuple[str, str]] = {
             str(s["index"]): (s.get("title", "Untitled"), _src_url(s))

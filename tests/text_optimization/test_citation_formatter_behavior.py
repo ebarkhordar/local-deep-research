@@ -1700,3 +1700,111 @@ class TestCitationFormatterApplyInlineHyperlinks:
             {"index": "2", "title": "T", "url": "https://b.com"},
         ]
         assert formatter.apply_inline_hyperlinks(content, sources) == content
+
+    def test_userinfo_never_reaches_the_rendered_citation(self):
+        """#5916: the destination is canonicalised, so no mode renders creds.
+
+        Every hyperlinking mode is covered because ``adapted`` is built
+        once and handed to all of them. The label matters as much as the
+        href: the domain-based modes derive their visible text from the
+        URL, so a raw ``user:pass@host`` was shown even to a reader who
+        never followed the link.
+        """
+        from local_deep_research.text_optimization.citation_formatter import (
+            CitationFormatter,
+            CitationMode,
+        )
+
+        sources = [
+            {
+                "index": "1",
+                "title": "Doc",
+                "url": "https://admin:hunter2@example.test/doc",
+            }
+        ]
+        hyperlinking = [
+            mode for mode in CitationMode if mode != CitationMode.NO_HYPERLINKS
+        ]
+        assert len(hyperlinking) == 5
+
+        for mode in hyperlinking:
+            result = CitationFormatter(mode=mode).apply_inline_hyperlinks(
+                "Claim [1].", sources
+            )
+            assert "hunter2" not in result, mode
+            assert "admin:" not in result, mode
+            assert "https://example.test/doc" in result, mode
+
+    def test_inline_destination_matches_the_bibliography_entry(self):
+        """#5916: one report cannot show two spellings of one source.
+
+        ``format_links_to_markdown`` already canonicalises. Pinning the
+        two against each other is what keeps them from drifting again,
+        rather than asserting a literal on each side.
+        """
+        from local_deep_research.text_optimization.citation_formatter import (
+            CitationFormatter,
+            CitationMode,
+        )
+        from local_deep_research.utilities.search_utilities import (
+            format_links_to_markdown,
+        )
+
+        sources = [
+            {
+                "index": "1",
+                "title": "Doc",
+                "url": "https://admin:hunter2@Example.test/doc/?utm_source=x",
+            }
+        ]
+        formatter = CitationFormatter(mode=CitationMode.NUMBER_HYPERLINKS)
+        result = formatter.apply_inline_hyperlinks("Claim [1].", sources)
+        bibliography = format_links_to_markdown(sources)
+
+        assert result == "Claim [[1]](https://example.test/doc)."
+        assert "URL: https://example.test/doc\n" in bibliography
+
+    def test_library_chunk_anchor_survives_canonicalisation(self):
+        """#5916: ``canonical_url_key`` alone would drop ``#chunk-<n>``.
+
+        It collapses every view of a library document onto one key, which
+        is right for grouping and wrong for display, so the inline path
+        asks ``preferred_chunk_display`` first exactly as the
+        bibliography does.
+        """
+        from local_deep_research.text_optimization.citation_formatter import (
+            CitationFormatter,
+            CitationMode,
+        )
+
+        formatter = CitationFormatter(mode=CitationMode.NUMBER_HYPERLINKS)
+        sources = [
+            {
+                "index": "1",
+                "title": "Paper",
+                "url": "/library/document/42/chunks#chunk-3",
+            }
+        ]
+        result = formatter.apply_inline_hyperlinks("Claim [1].", sources)
+
+        assert result == "Claim [[1]](/library/document/42/chunks#chunk-3)."
+
+    def test_non_string_url_is_skipped_not_rendered(self):
+        """#5916: ``canonical_url_key`` raises on a non-str.
+
+        These dicts reach the fallback path straight from engine output,
+        so the entry is skipped the way ``format_links_to_markdown``
+        skips it, leaving the bare ``[N]`` rather than crashing the
+        report.
+        """
+        from local_deep_research.text_optimization.citation_formatter import (
+            CitationFormatter,
+            CitationMode,
+        )
+
+        formatter = CitationFormatter(mode=CitationMode.NUMBER_HYPERLINKS)
+        sources = [{"index": "1", "title": "Doc", "url": {"href": "x"}}]
+
+        assert formatter.apply_inline_hyperlinks("Claim [1].", sources) == (
+            "Claim [1]."
+        )
